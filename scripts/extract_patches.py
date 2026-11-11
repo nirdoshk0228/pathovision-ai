@@ -77,6 +77,8 @@ def main(argv=None):
     p.add_argument("--seg-mpp", type=float, default=0.972)
     p.add_argument("--max-per-slide", type=int, default=2000, help="classification patches per slide")
     p.add_argument("--seg-per-slide", type=int, default=400)
+    p.add_argument("--seg-per-normal-slide", type=int, default=None,
+                   help="segmentation patches from slides without annotation (default: same as --seg-per-slide)")
     p.add_argument("--seg-neg-frac", type=float, default=0.3, help="share of tumour-free segmentation patches")
     p.add_argument("--no-cls", action="store_true")
     p.add_argument("--no-seg", action="store_true")
@@ -141,8 +143,9 @@ def main(argv=None):
         if not a.no_seg:
             c, frac, fp = candidates(reader, polys, a.seg_size, a.seg_mpp, thumb, tds, tissue, 0.1, overlap=0.5)
             pos_idx, neg_idx = np.nonzero(frac > 0)[0], np.nonzero(frac == 0)[0]
-            n_neg = int(round(a.seg_per_slide * (a.seg_neg_frac if len(pos_idx) else 1.0)))
-            n_pos = a.seg_per_slide - n_neg
+            per = a.seg_per_slide if polys or a.seg_per_normal_slide is None else a.seg_per_normal_slide
+            n_neg = int(round(per * (a.seg_neg_frac if len(pos_idx) else 1.0)))
+            n_pos = per - n_neg
             pick = np.concatenate([rng.permutation(pos_idx)[:n_pos], rng.permutation(neg_idx)[:n_neg]])
             d_img = os.path.join(a.out, "seg", split, "images")
             d_msk = os.path.join(a.out, "seg", split, "masks")

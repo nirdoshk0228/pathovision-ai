@@ -91,3 +91,27 @@ def test_hed_jitter_identity_when_zero():
 def test_dihedral_inverse(k):
     a = np.arange(5 * 7 * 3).reshape(5, 7, 3)
     assert np.array_equal(dihedral_inverse(dihedral(a, k), k), a)
+
+
+def test_lesion_detection_counts():
+    from pathovision.evaluation.metrics import lesion_detection
+
+    gt = np.zeros((100, 100), bool)
+    gt[10:20, 10:20] = True      # detected
+    gt[60:70, 60:70] = True      # missed
+    pred = np.zeros_like(gt)
+    pred[15:25, 15:25] = True    # overlaps lesion 1
+    pred[80:90, 10:20] = True    # false positive
+    r = lesion_detection(pred, gt, um_per_px=10.0, min_lesion_um2=100.0)
+    assert (r["gt_lesions"], r["detected_lesions"], r["pred_lesions"], r["fp_lesions"]) == (2, 1, 2, 1)
+    assert r["lesion_sensitivity"] == 0.5
+
+
+def test_tissue_threshold_capped_against_ink():
+    from pathovision.wsi.tissue import tissue_mask
+
+    img = np.full((300, 300, 3), 242, np.uint8)
+    img[50:250, 50:150] = (220, 180, 210)   # pale tissue (saturation ~46)
+    img[50:250, 180:260] = (20, 160, 40)    # strongly saturated green ink
+    m = tissue_mask(img, remove_dark=False)
+    assert m[150, 100], "pale tissue must survive even with saturated ink on the slide"

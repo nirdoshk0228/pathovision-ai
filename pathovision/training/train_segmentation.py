@@ -45,6 +45,8 @@ def parse_args(argv=None):
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--patience", type=int, default=6)
     p.add_argument("--tta", type=int, default=1)
+    p.add_argument("--stain-sigma", type=float, default=0.08,
+                   help="HED stain jitter strength (slides from different labs/batches differ in colour)")
     p.add_argument("--out-dir", default="runs/segmentation")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", default="auto")
@@ -70,7 +72,7 @@ def main(argv=None):
     device = get_device(args.device)
     os.makedirs(args.out_dir, exist_ok=True)
 
-    tr = SegPatchDataset(os.path.join(args.data_dir, "train"), augment=Augmenter())
+    tr = SegPatchDataset(os.path.join(args.data_dir, "train"), augment=Augmenter(stain_sigma=args.stain_sigma))
     val_dir = next((os.path.join(args.data_dir, d) for d in ("val", "valid")
                     if os.path.isdir(os.path.join(args.data_dir, d))), os.path.join(args.data_dir, "val"))
     va = SegPatchDataset(val_dir)

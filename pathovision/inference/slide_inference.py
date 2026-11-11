@@ -32,7 +32,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from pathovision.data.datasets import WSITileDataset
-from pathovision.evaluation.metrics import mask_dice_iou
+from pathovision.evaluation.metrics import lesion_detection, mask_dice_iou
 from pathovision.inference.quantify import quantify
 from pathovision.inference.stitching import StitchAccumulator
 from pathovision.inference.viz import add_colorbar, draw_mask_contours, overlay_heatmap, overlay_mask, resize_to
@@ -65,7 +65,9 @@ class AnalysisConfig:
     cls_threshold: Optional[float] = None  # None -> value stored in checkpoint (else 0.5)
     seg_threshold: float = 0.5
     seg_overlap: float = 0.25
-    seg_gate: float = 0.3
+    seg_gate: float = 0.5           # run the U-Net only near patches with classifier prob >= gate
+    require_agreement: bool = True  # keep U-Net tumour pixels only where the classifier also agrees
+    agree_threshold: float = 0.5    # classifier prob needed for agreement (checked on a 1-patch-dilated map)
     min_lesion_um2: float = 200.0   # smaller connected components are treated as noise
     device: str = "auto"
     mpp_override: Optional[float] = None
@@ -193,8 +195,15 @@ class SlideAnalyzer:
                             seg_acc.add(pj[0], sc[j, 0], sc[j, 1], seg_fp)
             seg_tiles = len(sc)
             final_map = seg_acc.result() * tissue_map
+            if cfg.require_agreement:
+                # Cascade agreement: the U-Net may refine boundaries, but a region only counts as tumour if the
+                # classifier also fired nearby (dilated by one patch so lesion edges are not clipped).
+                agree = (cls_map >= cfg.agree_threshold).astype(np.uint8)
+                k = max(3, int(np.ceil(cls_fp / map_ds)) * 2 + 1)
+                agree = cv2.dilate(agree, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))) > 0
+                final_map = final_map * agree
             final_thr = cfg.seg_threshold
-            source = "segmentation"
+            source = "segmentation+agreement" if cfg.require_agreement else "segmentation"
         else:
             final_map, final_thr, source = cls_map, cls_thr, "classification"
 
@@ -239,11 +248,12 @@ class SlideAnalyzer:
 
         # 5. ground-truth comparison --------------------------------------------
         gt_map = None
+        pred_mask = (final_map >= final_thr) & tissue_map
         if gt_xml and os.path.exists(gt_xml):
             gt_map = rasterize(load_asap_xml(gt_xml), map_shape, map_ds)
-            pred_mask = (final_map >= final_thr) & tissue_map
             report["ground_truth"] = {"xml": os.path.basename(gt_xml), **mask_dice_iou(pred_mask, gt_map),
-                                      "gt_tumor_area_mm2": float(gt_map.sum()) * (map_ds * reader.mpp / 1000) ** 2}
+                                      "gt_tumor_area_mm2": float(gt_map.sum()) * (map_ds * reader.mpp / 1000) ** 2,
+                                      **lesion_detection(pred_mask, gt_map, map_ds * reader.mpp, cfg.min_lesion_um2)}
 
         artefacts = {"thumb": thumb, "tissue": tissue, "map": final_map, "cls_map": cls_map, "tissue_map": tissue_map,
                      "gt_map": gt_map, "coords": coords, "tile_probs": tile_probs, "threshold": final_thr,
@@ -305,14 +315,16 @@ def main(argv=None):
     p.add_argument("--tta", type=int, default=1)
     p.add_argument("--stain-norm", action="store_true")
     p.add_argument("--map-max-side", type=int, default=4096)
-    p.add_argument("--seg-gate", type=float, default=0.3)
+    p.add_argument("--seg-gate", type=float, default=0.5)
+    p.add_argument("--no-agreement", action="store_true", help="use raw U-Net output without classifier agreement")
     p.add_argument("--device", default="auto")
     p.add_argument("--mpp", type=float, default=None, help="override level-0 microns/px")
     a = p.parse_args(argv)
     cfg = AnalysisConfig(classifier_ckpt=a.cls_ckpt, segmenter_ckpt=a.seg_ckpt, batch_size=a.batch_size,
                          seg_batch_size=a.seg_batch_size,
                          num_workers=a.workers, tta=a.tta, stain_norm=a.stain_norm, map_max_side=a.map_max_side,
-                         seg_gate=a.seg_gate, device=a.device, mpp_override=a.mpp)
+                         seg_gate=a.seg_gate, require_agreement=not a.no_agreement, device=a.device,
+                         mpp_override=a.mpp)
     last = {"stage": None}
 
     def prog(stage, frac):

@@ -18,6 +18,7 @@ import numpy as np
 def tissue_mask(
     rgb: np.ndarray,
     min_saturation: int = 15,
+    max_saturation_threshold: int = 35,
     max_value_background: int = 235,
     min_object_frac: float = 0.0005,
     kernel_frac: float = 0.004,
@@ -29,6 +30,9 @@ def tissue_mask(
         rgb: HxWx3 uint8 thumbnail.
         min_saturation: floor for the Otsu threshold (prevents a blank slide from
             producing a near-zero threshold that marks everything as tissue).
+        max_saturation_threshold: ceiling for the threshold. Very saturated pen ink
+            makes the histogram trimodal and can push Otsu above pale tissue (fat,
+            loose stroma); glass is almost always below ~15, so 35 is safe.
         max_value_background: pixels brighter than this in every channel are glass.
         min_object_frac: connected components smaller than this fraction of the
             image are discarded (dust, debris).
@@ -38,7 +42,7 @@ def tissue_mask(
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
     sat = cv2.GaussianBlur(hsv[..., 1], (5, 5), 0)
     otsu, _ = cv2.threshold(sat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    thr = max(float(otsu), float(min_saturation))
+    thr = min(max(float(otsu), float(min_saturation)), float(max_saturation_threshold))
     mask = sat > thr
 
     mask &= ~(rgb.min(axis=2) > max_value_background)

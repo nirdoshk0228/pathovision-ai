@@ -61,3 +61,33 @@ def mask_dice_iou(pred: np.ndarray, target: np.ndarray) -> Dict[str, float]:
     pred, target = pred.astype(bool), target.astype(bool)
     inter = float((pred & target).sum())
     return dice_iou_from_sums(inter, float(pred.sum()), float(target.sum()))
+
+
+def lesion_detection(pred: np.ndarray, gt: np.ndarray, um_per_px: float, min_lesion_um2: float = 200.0) -> Dict[str, float]:
+    """Lesion-level detection, in the spirit of the CAMELYON16 FROC evaluation.
+
+    A ground-truth lesion is *detected* if any predicted pixel overlaps it; a
+    predicted lesion is a *false positive* if it overlaps no ground-truth lesion.
+    Components smaller than ``min_lesion_um2`` are ignored on both sides.
+    """
+    import cv2
+
+    min_px = max(1, int(np.ceil(min_lesion_um2 / um_per_px ** 2)))
+
+    def comps(m):
+        n, lab, stats, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), connectivity=8)
+        keep = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= min_px]
+        return lab, keep
+
+    gl, gk = comps(gt)
+    pl, pk = comps(pred)
+    pred_any = np.isin(pl, pk)
+    gt_any = np.isin(gl, gk)
+    # overlap counts per label in one pass each (no per-lesion full-image scans)
+    gt_hits = np.bincount(gl[pred_any], minlength=gl.max() + 1)
+    pred_hits = np.bincount(pl[gt_any], minlength=pl.max() + 1)
+    detected = int(sum(gt_hits[i] > 0 for i in gk))
+    fp = int(sum(pred_hits[i] == 0 for i in pk))
+    return {"gt_lesions": len(gk), "detected_lesions": detected,
+            "lesion_sensitivity": float(detected / len(gk)) if gk else float("nan"),
+            "pred_lesions": len(pk), "fp_lesions": fp}

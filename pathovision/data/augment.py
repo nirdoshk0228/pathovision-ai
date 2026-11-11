@@ -30,8 +30,9 @@ def dihedral_inverse(img: np.ndarray, k: int) -> np.ndarray:
 
 
 class Augmenter:
-    def __init__(self, stain: bool = True, color: bool = True, blur_p: float = 0.1, seed: Optional[int] = None):
-        self.stain, self.color, self.blur_p = stain, color, blur_p
+    def __init__(self, stain: bool = True, color: bool = True, blur_p: float = 0.1, seed: Optional[int] = None,
+                 stain_sigma: float = 0.05):
+        self.stain, self.color, self.blur_p, self.stain_sigma = stain, color, blur_p, stain_sigma
         self.rng = np.random.default_rng(seed)
 
     def __call__(self, img: np.ndarray, mask: Optional[np.ndarray] = None) -> Tuple[np.ndarray, Optional[np.ndarray]]:
@@ -40,7 +41,7 @@ class Augmenter:
         if mask is not None:
             mask = dihedral(mask, k)
         if self.stain and self.rng.random() < 0.8:
-            img = hed_jitter(img, sigma=0.05, bias=0.03, rng=self.rng)
+            img = hed_jitter(img, sigma=self.stain_sigma, bias=0.6 * self.stain_sigma, rng=self.rng)
         if self.color and self.rng.random() < 0.5:
             a = self.rng.uniform(0.9, 1.1)
             b = self.rng.uniform(-12, 12)

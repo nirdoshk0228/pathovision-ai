@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .ipynb_checkpoints/
 .streamlit/secrets.toml
+# large artefacts: only at the repo root (a bare "data/" would also hide pathovision/data/)
 /data/
 /runs/
 /outputs/
